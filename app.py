@@ -510,6 +510,7 @@ async def home():
 
 
 @app.get("/ping")
+@app.head("/ping")
 async def ping():
     """
     Lightweight ping endpoint for uptime monitoring services (UptimeRobot, cron-job.org, etc.)
@@ -520,6 +521,7 @@ async def ping():
         "timestamp": datetime.utcnow().isoformat(),
         "service": "God Level Scraper v3"
     }
+
 
 
 @app.get("/health")
