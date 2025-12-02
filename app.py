@@ -4,15 +4,18 @@ God Level Scraper v3 — Focused platforms (drop-in)
 This variant restricts scraping to only coding/resource platforms:
 - GitHub, GeeksforGeeks, LeetCode, StackOverflow, W3Schools
 
+
 Behavior changes from previous:
 - Only queries the above platforms (less noisy)
 - Smaller per-platform result limits and lower concurrency
 - Keeps extractive + optional OpenRouter abstractive summarization
 - Keeps caching hooks (in-memory + optional Redis) and Playwright fallback (optional)
 
+
 IMPORTANT:
 - You already hardcoded an OpenRouter key below. Keep it secure.
 - If you want to change platforms later, edit the `wanted` parsing in /fetch.
+
 
 Run:
     uvicorn app:app --reload --host 0.0.0.0 --port 8000
@@ -25,12 +28,16 @@ import heapq
 import asyncio
 from typing import List, Dict, Any, Optional, Iterable
 from urllib.parse import quote
+from datetime import datetime
+
 
 from fastapi import FastAPI, Body, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
+
 import httpx
 from bs4 import BeautifulSoup
+
 
 # Optional libs (not required)
 try:
@@ -39,11 +46,13 @@ try:
 except Exception:
     READABILITY_AVAILABLE = False
 
+
 try:
     from cachetools import TTLCache
     CACHE_AVAILABLE = True
 except Exception:
     CACHE_AVAILABLE = False
+
 
 try:
     import aioredis
@@ -51,11 +60,13 @@ try:
 except Exception:
     REDIS_AVAILABLE = False
 
+
 try:
     from playwright.async_api import async_playwright
     PLAYWRIGHT_AVAILABLE = True
 except Exception:
     PLAYWRIGHT_AVAILABLE = False
+
 
 # ------------------------------
 # OpenRouter Summarizer Config
@@ -66,7 +77,9 @@ OPENROUTER_API_KEY = "sk-or-v1-c14bbe805ec149d8569a09f1422edb324b870d8cbd461a072
 OPENROUTER_MODEL = "gpt-4o-mini"
 USE_OPENROUTER = bool(OPENROUTER_API_KEY)
 
+
 app = FastAPI(title="God Level Smart Scraper v3 (focused)", version="3.0")
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -75,6 +88,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 # Rotating User-Agents
 USER_AGENTS = [
@@ -88,15 +102,18 @@ DEFAULT_HEADERS = {
     "Connection": "keep-alive",
 }
 
+
 # In-memory cache (LRU TTL) if cachetools installed
 if CACHE_AVAILABLE:
     LRU_CACHE = TTLCache(maxsize=1024, ttl=60 * 30)  # 30 min default
 else:
     LRU_CACHE = {}
 
+
 # Redis config (optional)
 redis = None
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+
 
 
 async def init_redis():
@@ -105,9 +122,11 @@ async def init_redis():
         redis = await aioredis.from_url(REDIS_URL)
 
 
+
 def _choose_ua():
     import random
     return random.choice(USER_AGENTS)
+
 
 
 async def fetch_url(client: httpx.AsyncClient, url: str, use_js: bool = False, timeout: int = 12) -> Optional[httpx.Response]:
@@ -133,6 +152,7 @@ async def fetch_url(client: httpx.AsyncClient, url: str, use_js: bool = False, t
             await asyncio.sleep(backoff)
             backoff *= 2
 
+
     # JS rendering fallback
     if use_js and PLAYWRIGHT_AVAILABLE:
         try:
@@ -144,6 +164,7 @@ async def fetch_url(client: httpx.AsyncClient, url: str, use_js: bool = False, t
                 content = await page.content()
                 await browser.close()
 
+
                 class Dummy:
                     def __init__(self, text):
                         self.status_code = 200
@@ -153,7 +174,9 @@ async def fetch_url(client: httpx.AsyncClient, url: str, use_js: bool = False, t
         except Exception:
             return None
 
+
     return None
+
 
 
 def extract_metadata(html: str, url: str) -> Dict[str, Any]:
@@ -187,6 +210,7 @@ def extract_metadata(html: str, url: str) -> Dict[str, Any]:
     return meta
 
 
+
 def extract_main_text(html: str) -> str:
     """Try readability; fallback to <article> or largest <div> heuristic; else body text."""
     if READABILITY_AVAILABLE:
@@ -200,12 +224,14 @@ def extract_main_text(html: str) -> str:
         except Exception:
             pass
 
+
     soup = BeautifulSoup(html, "html.parser")
     article = soup.find("article")
     if article:
         text = article.get_text(separator="\n", strip=True)
         if len(text.split()) > 30:
             return text
+
 
     candidates = soup.find_all(["div", "main", "section"], recursive=True)
     best = ""
@@ -216,6 +242,7 @@ def extract_main_text(html: str) -> str:
     if best:
         return best
     return soup.get_text(separator="\n", strip=True)
+
 
 
 def simple_summarize(text: str, max_sentences: int = 3) -> str:
@@ -229,6 +256,7 @@ def simple_summarize(text: str, max_sentences: int = 3) -> str:
     scored = sorted(sents, key=lambda s: len(s), reverse=True)[:max_sentences]
     scored_sorted = sorted(scored, key=lambda s: sents.index(s))
     return " ".join(scored_sorted)
+
 
 
 async def fetch_and_process(client: httpx.AsyncClient, url: str, use_js: bool = False, summary_sentences: int = 3) -> Dict[str, Any]:
@@ -248,6 +276,7 @@ async def fetch_and_process(client: httpx.AsyncClient, url: str, use_js: bool = 
         "summary": short_summary,
         "word_count": len(main_text.split())
     }
+
 
 
 # -----------------------
@@ -274,6 +303,7 @@ async def search_geeksforgeeks(client: httpx.AsyncClient, query: str, limit: int
     return results
 
 
+
 async def search_stackoverflow(client: httpx.AsyncClient, query: str, limit: int = 4) -> List[Dict[str, Any]]:
     results = []
     url = f"https://stackoverflow.com/search?q={quote(query)}"
@@ -290,6 +320,7 @@ async def search_stackoverflow(client: httpx.AsyncClient, query: str, limit: int
                 results.append({"title": title, "url": full, "type": "StackOverflow"})
     await asyncio.sleep(0.4)
     return results
+
 
 
 async def search_github(client: httpx.AsyncClient, query: str, limit: int = 4) -> List[Dict[str, Any]]:
@@ -310,6 +341,7 @@ async def search_github(client: httpx.AsyncClient, query: str, limit: int = 4) -
                 results.append({"title": title or "GitHub Repo", "url": full, "type": "GitHub"})
     await asyncio.sleep(0.4)
     return results
+
 
 
 async def search_leetcode(client: httpx.AsyncClient, query: str, limit: int = 4) -> List[Dict[str, Any]]:
@@ -336,6 +368,7 @@ async def search_leetcode(client: httpx.AsyncClient, query: str, limit: int = 4)
     results.append({"title": f"Search LeetCode for '{query}'", "url": search_url, "type": "LeetCode"})
     await asyncio.sleep(0.3)
     return results
+
 
 
 async def search_w3schools(client: httpx.AsyncClient, query: str, limit: int = 4) -> List[Dict[str, Any]]:
@@ -367,6 +400,7 @@ async def search_w3schools(client: httpx.AsyncClient, query: str, limit: int = 4
     return results
 
 
+
 # -----------------------
 # Topic summarization helpers
 # -----------------------
@@ -377,8 +411,10 @@ def split_sentences(text: str) -> List[str]:
     return [s.strip() for s in sents if len(s.strip()) > 10]
 
 
+
 def tokenize(sentence: str) -> List[str]:
     return re.findall(r"\w+", sentence.lower())
+
 
 
 def build_tf(sentences: Iterable[str]) -> Dict[str, int]:
@@ -387,6 +423,7 @@ def build_tf(sentences: Iterable[str]) -> Dict[str, int]:
         for t in tokenize(s):
             tf[t] = tf.get(t, 0) + 1
     return tf
+
 
 
 def score_sentences(sentences: Iterable[str], tf: Dict[str, int]) -> List[tuple]:
@@ -402,6 +439,7 @@ def score_sentences(sentences: Iterable[str], tf: Dict[str, int]) -> List[tuple]
     return scores
 
 
+
 def aggregate_topic_summary(texts: Iterable[str], max_sentences: int = 5) -> str:
     all_sentences: List[str] = []
     for t in texts:
@@ -415,6 +453,7 @@ def aggregate_topic_summary(texts: Iterable[str], max_sentences: int = 5) -> str
     top_idxs = sorted([i for (_, i) in top])
     chosen = [all_sentences[i] for i in top_idxs]
     return " ".join(chosen)
+
 
 
 async def openrouter_summarize(text: str, max_tokens: int = 250) -> str:
@@ -461,6 +500,50 @@ async def openrouter_summarize(text: str, max_tokens: int = 250) -> str:
         return ""
 
 
+
+# -----------------------
+# Health/Ping endpoints for uptime monitoring
+# -----------------------
+@app.get("/")
+async def home():
+    return {"status": "ok", "message": "God Level Scraper v3 (focused) Running 🚀"}
+
+
+@app.get("/ping")
+async def ping():
+    """
+    Lightweight ping endpoint for uptime monitoring services (UptimeRobot, cron-job.org, etc.)
+    This prevents Render free tier from sleeping after 15 minutes of inactivity.
+    """
+    return {
+        "status": "alive",
+        "timestamp": datetime.utcnow().isoformat(),
+        "service": "God Level Scraper v3"
+    }
+
+
+@app.get("/health")
+async def health_check():
+    """
+    Health check endpoint with basic service status.
+    Returns HTTP 200 if service is healthy.
+    """
+    health_status = {
+        "status": "healthy",
+        "timestamp": datetime.utcnow().isoformat(),
+        "service": "God Level Scraper v3",
+        "features": {
+            "readability": READABILITY_AVAILABLE,
+            "cache": CACHE_AVAILABLE,
+            "redis": REDIS_AVAILABLE,
+            "playwright": PLAYWRIGHT_AVAILABLE,
+            "openrouter": USE_OPENROUTER
+        }
+    }
+    return health_status
+
+
+
 # -----------------------
 # Main /fetch endpoint (focused platforms)
 # -----------------------
@@ -477,11 +560,14 @@ async def fetch_resources(
     if not query:
         raise HTTPException(status_code=400, detail="Missing 'query' in payload")
 
+
     if use_cache and REDIS_AVAILABLE:
         await init_redis()
 
+
     # default to only coding platforms
     wanted = set([p.strip().lower() for p in (platforms or "gfg,so,gh,leetcode,w3").split(",") if p.strip()])
+
 
     async with httpx.AsyncClient(follow_redirects=True, timeout=18) as client:
         tasks = []
@@ -496,7 +582,9 @@ async def fetch_resources(
         if "w3" in wanted or "w3schools" in wanted:
             tasks.append(search_w3schools(client, query, limit=limit))
 
+
         platform_results_lists = await asyncio.gather(*tasks, return_exceptions=True)
+
 
         candidate_entries: List[Dict[str, Any]] = []
         for pl_res in platform_results_lists:
@@ -507,6 +595,7 @@ async def fetch_resources(
                 if url:
                     candidate_entries.append(e)
 
+
         # dedupe preserving order
         seen = set()
         unique_entries = []
@@ -514,6 +603,7 @@ async def fetch_resources(
             if e["url"] not in seen:
                 seen.add(e["url"])
                 unique_entries.append(e)
+
 
         # For each unique entry, check cache then fetch+process if needed
         fetch_jobs = []
@@ -541,9 +631,11 @@ async def fetch_resources(
             else:
                 fetch_jobs.append((e, fetch_and_process(client, url, use_js=use_js, summary_sentences=summary_sentences)))
 
+
         results: List[Dict[str, Any]] = []
         if fetch_jobs:
             sem = asyncio.Semaphore(6)  # lower concurrency for focused scraping
+
 
             async def run_with_sem(entry, coro):
                 async with sem:
@@ -551,6 +643,7 @@ async def fetch_resources(
                         return entry, await coro
                     except Exception as ex:
                         return entry, {"url": entry.get("url"), "error": str(ex)}
+
 
             run_coros = [run_with_sem(entry, coro) for entry, coro in fetch_jobs]
             done = await asyncio.gather(*run_coros, return_exceptions=False)
@@ -571,15 +664,18 @@ async def fetch_resources(
                             pass
                 results.append(entry)
 
+
         # include ones that were cached earlier and not in results list
         for e in unique_entries:
             if "scraped" in e and e not in results:
                 results.append(e)
 
+
     # Group results (keeps only focused platforms)
     grouped: Dict[str, List[Dict[str, Any]]] = {}
     for r in results:
         grouped.setdefault(r.get("type", "Other"), []).append(r)
+
 
     # --------------------------
     # Aggregate texts for topic summary
@@ -597,8 +693,10 @@ async def fetch_resources(
             if meta.get("description"):
                 collected_texts.append(meta["description"])
 
+
     # Filter very short texts
     collected_texts = [t for t in collected_texts if t and len(t) > 30]
+
 
     topic_summary_extractive = aggregate_topic_summary(collected_texts, max_sentences=5)
     topic_summary_abstractive = ""
@@ -612,7 +710,9 @@ async def fetch_resources(
             print("OpenRouter summarization failed:", e)
             topic_summary_abstractive = ""
 
+
     topic_summary_final = topic_summary_abstractive or topic_summary_extractive or "No summaryable content found."
+
 
     response = {
         "query": query,
@@ -627,13 +727,10 @@ async def fetch_resources(
         }
     }
 
+
     return response
 
 
-@app.get("/")
-async def home():
-    return {"status": "ok", "message": "God Level Scraper v3 (focused) Running 🚀"}
-# should be false yaar why is this
 
 if __name__ == "__main__":
     import uvicorn
